@@ -1,0 +1,223 @@
+---
+title: "Test DVC"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidymodels)
+library(stacks)
+library(yardstick)
+library(tidyverse)
+library(workflows)
+library(gt)
+```
+
+The goal of this document is fit and select candidate models. We use the [DVC](https://dvc.org) system to track and manage the model hyperparameters and metrics, and [tidymodels](https://tidymodels.prg) for the actual fitting.
+
+## Model Goal
+
+Our goal will be to predict housing prices for the Ames housing data set. For the purposes of DVC, I've written this dataset out to a csv to demonstrate how to track the model.
+
+```r
+library(AmesHousing)
+write_csv(ames_raw, "housing.csv")
+```
+
+We will use the and `tune` package to evaluate a few different models.
+
+```{r data}
+# first read our data and create test / training
+data <- read_csv("housing.csv")
+housing_split <- initial_split(data)
+housing_train <- training(housing_split)
+housing_test <- testing(housing_split)
+
+# within training, setup 5 fold cross validation 
+folds <- rsample::vfold_cv(housing_train, v=4)
+```
+
+We will create a simple recipe to clean the data a bit.
+
+```{r recipe}
+housing_rec <- 
+    recipe(SalePrice ~ PID + `Lot Area` +`Year Built` + `Total Bsmt SF` + `Full Bath` + `Half Bath` + Fireplaces + `Garage Cars`, data = housing_train) %>% 
+  update_role(PID, new_role = "ID") %>% 
+  step_dummy(all_nominal()) %>%  
+  step_meanimpute(all_numeric()) %>% 
+  step_zv(all_predictors()) %>% 
+  step_nzv(all_predictors())
+
+housing_rec %>% 
+  prep() %>% 
+  bake(housing_train)
+
+# create a workflow (pipeline) that will ultimately house 
+# the recipe and the model fits
+housing_wflow <- 
+  workflow()  %>% 
+  add_recipe(housing_rec)
+
+# use rmse as the optimizing metric
+metric <- metric_set(rmse)
+```
+
+## Mashing up tidymodels and DVC
+
+Now we will define our candidate models and set them up to be tuned Here is where there is a bit of a disconnect between DVC and tidymodels. DVC wants to be in control of the stages of processing data, fitting a model, searching hyper parameters etc. But tidymodels expects to own all of that through the workflow construct!
+
+It is not clear to me how the workflow could be split up so that the different pieces could be controlled and cached by DVC. I think you hit the same problem if you try to mash up packages like `drake` or `targets` and `tidymodels`. My hunch is that you could skip the workflow and just use the raw building blocks of tidymodels, but then you miss out on the simple and clean syntax. For reference, this is a pretty interesting attempt: https://mdneuzerling.com/post/machine-learning-pipelines-with-tidymodels-and-targets/.
+
+> The problem with model flow controllers is that they can't agree where the boundaries should be!
+
+In this case we will do a bit of a hybrid approach. I will let tune handle the lasso regression, but will set the number of trees using an experiment parameter that will be tracked by DVC and read from the file `params.yml`. The downside here is that there will potentially be variation in the "experiments" not accounted for by the experimental inputs! I could fix some of this variation by setting a random seed.
+
+The outcome is that the DVC "pipeline" will really be just one big step, `rmarkdown::render` that contains all the sub-steps inside of it. On the plus side, we still get the benefits of using DVC to version the input data and experiment parameters as well as the output. 
+
+## Back to models
+
+```{r specs}
+# first the linear regression with penalty
+# here we will use tune to set the penalty and mixture
+lin_reg_spec <- 
+  linear_reg(penalty = tune("penalty"), mixture = tune("mixture")) %>% 
+  set_engine("glmnet")
+
+# add the preprocessing recipe to the model
+lin_reg_wflow <- 
+  housing_wflow %>% 
+  add_model(lin_reg_spec)
+
+# setup the grid that will tune the different parameters
+# and generate a bunch of resample fit models to use for 
+# the ensemble stack!
+lin_res <- 
+  tune_grid(
+    lin_reg_wflow,
+    resamples = folds,
+    metrics = metric,
+    control = stacks::control_stack_grid()
+  )
+
+# next setup the tree model, using the DVC defined experiment parameters
+params <- yaml::read_yaml('params.yml')
+trees <- params$tune$trees
+tree_spec <- boost_tree(mode = "regression", trees = trees) %>% 
+  set_engine("xgboost")
+
+# add the preprocessing recipe to the model
+tree_wflow <- 
+  housing_wflow %>% 
+  add_model(tree_spec)
+
+# we aren't using a tune grid to create different resamples
+# but we still need resamples for the model stacking, so we specify a resample spec
+tree_res <- 
+  fit_resamples(
+    tree_wflow,
+    metric = metric,
+    resamples  = folds,
+    control = stacks::control_stack_resamples()
+  )
+```
+
+> Tip! Use yaml::read_yaml('params.yml') to read the experiment parameters in the way that is compatible with DVC pipeline definitions
+
+Finally we can create the ensemble definition using `stacks` and begin fitting!
+
+```{r ensemble}
+housing_model_stack <- 
+  stacks() %>% 
+  add_candidates(lin_res) %>% 
+  add_candidates(tree_res)
+
+# Argh for some reason this is not working
+# housing_model_stack %>% 
+#   blend_predictions()
+
+# Instead I can just use glmnet manually to figure out the best blend
+# which is what blend_predictions does under the hood
+# but we will use the cross validation in glmnet instead of the results of our
+# resampling above... so tree_res never ends up getting used
+cv <- cv.glmnet(
+  as.matrix(housing_model_stack[,-1]), 
+  as.matrix(housing_model_stack[,1])
+)
+best_mix <- which(cv$lambda == cv$lambda.1se)
+weights <- cv$glmnet.fit$beta[,best_mix]
+intercept <- cv$glmnet.fit$a0[best_mix]
+
+# but now I have to do quite a bit of work to finalize the workflows
+# in order to have a prediction function
+
+# first pull out the models used by the stack
+all_info <- attributes(housing_model_stack)
+
+# finalize the linear models
+lin_reg_params <- all_info$model_metrics$lin_res %>% 
+  select(penalty, mixture)
+
+lin_reg_wflow_fit <-  map(1:nrow(lin_reg_params), function(i){
+    finalize_workflow(lin_reg_wflow, lin_reg_params[i,]) %>% 
+    fit(housing_train)
+  })
+
+# now finalize the tree model; again, no 'tuning' here
+# so there is no need to go back to the resamples
+tree_wflow_fit <-  
+  finalize_workflow(tree_wflow, list(trees = trees)) %>% 
+  fit(housing_train)
+
+# with the fitted workflows, and the lasso ensemble coefficients
+# we can create the final "predict" function for our "ensemble"
+ensemble_predict <- function(new_data){
+  lin_predictions <- map(lin_reg_wflow_fit, predict, new_data)
+  # list to data frame                              
+  lin_predictions_df <- do.call(cbind, lin_predictions)
+  tree_predictions <- predict(tree_wflow_fit, new_data)
+  
+  # assemble in the right order
+  x <- cbind(1, lin_predictions_df, tree_predictions)
+  colnames(x) <- c("Intercept", all_info$names[-1])
+  beta <- c(intercept, weights)
+  ensemble_predictions <- as.matrix(x)%*%beta
+  x$Intercept <- NULL
+  x$ensemble <- as.numeric(ensemble_predictions)
+  x
+}
+
+
+
+```
+
+Now that we have our ensemble we can produce a few metrics that will be displayed in the DVC pull requests. 
+
+```{r metrics}
+results <- ensemble_predict(housing_test)
+
+get_metrics <- function(results, model_name) {
+  print(model_name)
+  tibble(
+    model = model_name,
+    rmse = rmse_vec(housing_test$SalePrice, results[,model_name]),
+    rsq = rsq_vec(housing_test$SalePrice, results[,model_name]),
+  )
+}
+
+metrics <- map_df(colnames(results), ~get_metrics(results, .x))
+metrics
+```
+```{r}
+gt(metrics) %>% 
+  gtsave("metrics_table.html")
+
+```
+
+Finally, we can write out a metrics file and a plots file to take advantage of the  which will help make the diff's easier:
+
+```{r}
+metrics %>% 
+  arrange(desc(rsq)) %>% 
+  head(n=1) %>% 
+  jsonlite::write_json('metrics.json')
+```
