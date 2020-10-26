@@ -282,6 +282,13 @@
       "Repository": "RSPM",
       "Hash": "2b7d10581cc730804e9ed178c8374bd6"
     },
+    "data.table": {
+      "Package": "data.table",
+      "Version": "1.12.8",
+      "Source": "Repository",
+      "Repository": "RSPM",
+      "Hash": "cd711af60c47207a776213a368626369"
+    },
     "dbplyr": {
       "Package": "dbplyr",
       "Version": "1.4.4",
@@ -1375,6 +1382,13 @@
       "Source": "Repository",
       "Repository": "RSPM",
       "Hash": "ddeca7650052ff9131ac7c41a9a77b3b"
+    },
+    "xgboost": {
+      "Package": "xgboost",
+      "Version": "1.1.1.1",
+      "Source": "Repository",
+      "Repository": "RSPM",
+      "Hash": "17b1f93f73844394d1578de45a681bea"
     },
     "xml2": {
       "Package": "xml2",
