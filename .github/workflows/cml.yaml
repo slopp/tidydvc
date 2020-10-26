@@ -1,4 +1,4 @@
-name: penguin-noses
+name: tidymodels-dvc-mashup
 on: [push]
 jobs:
   run:
@@ -14,7 +14,7 @@ jobs:
 
           apt-get update -y 
           apt-get install -y libssl-dev libcurl4-openssl-dev libxml2-dev
-          
+          dvc get-url https://gist.github.com/slopp/aaa98f5c9d8d5161396b6afedb1b1b52#file-housing-csv housing.csv
           dvc repro
           
           cat fit_model.html >> report.md 

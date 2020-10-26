@@ -1,4 +1,2 @@
-[core]
-    remote = myremote
 ['remote "myremote"']
-    url = ../housing.csv
+    url = s3://testdvc
