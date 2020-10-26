@@ -22,5 +22,14 @@ jobs:
           dvc get-url https://gist.githubusercontent.com/slopp/aaa98f5c9d8d5161396b6afedb1b1b52/raw/86c6190a539ef751bfa99b3592d6a1952cccf939/housing.csv housing.csv
           dvc repro
           
-          cat fit_model.html >> report.md 
+          cat metrics_table.html >> report.md 
           cml-send-comment report.md
+      - name: Commit changes
+        uses: EndBug/add-and-commit@v5
+        with:
+          author_name: Sean Lopp
+          author_email: lopp.sean@gmail.com
+          message: "Result of run"
+          add: "fit_model.html metrics.json metrics_table.html"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
