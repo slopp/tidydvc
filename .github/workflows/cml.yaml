@@ -25,8 +25,8 @@ jobs:
           # Report metrics
           echo "## Diff" >> report.md
           git fetch --prune
-          dvc params diff master --show-md >> report.md
-          dvc metrics diff master --show-md >> report.md
+          dvc params diff main --show-md >> report.md
+          dvc metrics diff main --show-md >> report.md
           
           
           # Table for current run
