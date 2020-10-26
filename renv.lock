@@ -1322,6 +1322,13 @@
       "Repository": "RSPM",
       "Hash": "1739235995f08583db4095a28c357207"
     },
+    "vip": {
+      "Package": "vip",
+      "Version": "0.2.2",
+      "Source": "Repository",
+      "Repository": "RSPM",
+      "Hash": "ca6163837c7c626b16f7911f73bc4d8c"
+    },
     "viridisLite": {
       "Package": "viridisLite",
       "Version": "0.3.0",

@@ -11,9 +11,12 @@ library(yardstick)
 library(tidyverse)
 library(workflows)
 library(gt)
+library(vip)
+library(jsonlite)
+library(yaml)
 ```
 
-The goal of this document is fit and select candidate models. We use the [DVC](https://dvc.org) system to track and manage the model hyperparameters and metrics, and [tidymodels](https://tidymodels.prg) for the actual fitting.
+The goal of this document is fit and select candidate models. We use the [DVC](https://dvc.org) system to track and manage the model hyper-parameters and metrics, and [tidymodels](https://tidymodels.prg) for the actual fitting.
 
 ## Model Goal
 
@@ -24,7 +27,7 @@ library(AmesHousing)
 write_csv(ames_raw, "housing.csv")
 ```
 
-We will use the and `tune` package to evaluate a few different models.
+We will use the `tune` package to evaluate a few different models. I attempted to use `stacks` to fit ensembles as well but hit an error, however we will also consider a manually fit ensemble.
 
 ```{r data}
 # first read our data and create test / training
@@ -33,7 +36,7 @@ housing_split <- initial_split(data)
 housing_train <- training(housing_split)
 housing_test <- testing(housing_split)
 
-# within training, setup 5 fold cross validation 
+# within training, setup fold cross validation 
 folds <- rsample::vfold_cv(housing_train, v=4)
 ```
 
@@ -52,8 +55,9 @@ housing_rec %>%
   prep() %>% 
   bake(housing_train)
 
-# create a workflow (pipeline) that will ultimately house 
-# the recipe and the model fits
+# create a workflow (pipeline) that will track this preprocessing
+# and allow us to build up a pipeline for fitting the models
+
 housing_wflow <- 
   workflow()  %>% 
   add_recipe(housing_rec)
@@ -76,7 +80,9 @@ The outcome is that the DVC "pipeline" will really be just one big step, `rmarkd
 
 ## Back to models
 
-```{r specs}
+The idea with tuning is to fit a bunch of candidate models using cross validation `model_spec` + `workflow` + `tune_grid`. Then from the candidate models, pick the best model, or use the best of the candidates in an ensemble!
+
+```{r linear}
 # first the linear regression with penalty
 # here we will use tune to set the penalty and mixture
 lin_reg_spec <- 
@@ -98,7 +104,9 @@ lin_res <-
     metrics = metric,
     control = stacks::control_stack_grid()
   )
+```
 
+```{r trees}
 # next setup the tree model, using the DVC defined experiment parameters
 params <- yaml::read_yaml('params.yml')
 trees <- params$tune$trees
@@ -110,8 +118,10 @@ tree_wflow <-
   housing_wflow %>% 
   add_model(tree_spec)
 
-# we aren't using a tune grid to create different resamples
+# we aren't using a tune grid to create different resamples because we aren't tuning
 # but we still need resamples for the model stacking, so we specify a resample spec
+# we need resamples so that the trained candidates from the tune grid can 
+# have a matching resample when we fit the ensemble
 tree_res <- 
   fit_resamples(
     tree_wflow,
@@ -123,9 +133,12 @@ tree_res <-
 
 > Tip! Use yaml::read_yaml('params.yml') to read the experiment parameters in the way that is compatible with DVC pipeline definitions
 
-Finally we can create the ensemble definition using `stacks` and begin fitting!
+~Finally we can create the ensemble definition using `stacks` and begin fitting!~ Unfortunately this didn't work, but we can get close with our own `glmnet`.
 
 ```{r ensemble}
+# create the stack
+# this is where we align the resample subsets with the resample sets used
+# to train the tuned cross validation candidates
 housing_model_stack <- 
   stacks() %>% 
   add_candidates(lin_res) %>% 
@@ -137,38 +150,44 @@ housing_model_stack <-
 
 # Instead I can just use glmnet manually to figure out the best blend
 # which is what blend_predictions does under the hood
-# but we will use the cross validation in glmnet instead of the results of our
-# resampling above... so tree_res never ends up getting used
 cv <- cv.glmnet(
   as.matrix(housing_model_stack[,-1]), 
   as.matrix(housing_model_stack[,1])
 )
+cv$lambda.1se
 best_mix <- which(cv$lambda == cv$lambda.1se)
 weights <- cv$glmnet.fit$beta[,best_mix]
 intercept <- cv$glmnet.fit$a0[best_mix]
 
 # but now I have to do quite a bit of work to finalize the workflows
 # in order to have a prediction function
+# we finalize the the models that were fit on a resampled subset (during cv) 
+# so they are fit on the entire training dataset
 
 # first pull out the models used by the stack
+# this is a helpful R tip if there isn't a getter for what you need
 all_info <- attributes(housing_model_stack)
 
 # finalize the linear models
+# this pulls the tuned parameters for the models used to 
+# generate the data stack
 lin_reg_params <- all_info$model_metrics$lin_res %>% 
   select(penalty, mixture)
 
+# this finalizes the model workflow, fitting the cv candidate models
+# with the whole training data 
 lin_reg_wflow_fit <-  map(1:nrow(lin_reg_params), function(i){
     finalize_workflow(lin_reg_wflow, lin_reg_params[i,]) %>% 
     fit(housing_train)
   })
 
 # now finalize the tree model; again, no 'tuning' here
-# so there is no need to go back to the resamples
+# so there is no need to go back to the stack
 tree_wflow_fit <-  
   finalize_workflow(tree_wflow, list(trees = trees)) %>% 
   fit(housing_train)
 
-# with the fitted workflows, and the lasso ensemble coefficients
+# with the fitted workflows, and the glmnet ensemble coefficients
 # we can create the final "predict" function for our "ensemble"
 ensemble_predict <- function(new_data){
   lin_predictions <- map(lin_reg_wflow_fit, predict, new_data)
@@ -176,7 +195,7 @@ ensemble_predict <- function(new_data){
   lin_predictions_df <- do.call(cbind, lin_predictions)
   tree_predictions <- predict(tree_wflow_fit, new_data)
   
-  # assemble in the right order
+  # assemble in the right order (same as the stack used in the glm)
   x <- cbind(1, lin_predictions_df, tree_predictions)
   colnames(x) <- c("Intercept", all_info$names[-1])
   beta <- c(intercept, weights)
@@ -207,17 +226,95 @@ get_metrics <- function(results, model_name) {
 metrics <- map_df(colnames(results), ~get_metrics(results, .x))
 metrics
 ```
-```{r}
+
+```{r save-table}
 gt(metrics) %>% 
   gtsave("metrics_table.html")
 
 ```
 
-Finally, we can write out a metrics file and a plots file to take advantage of the  which will help make the diff's easier:
-
-```{r}
+```{r save-metrics}
 metrics %>% 
   arrange(desc(rsq)) %>% 
   head(n=1) %>% 
   jsonlite::write_json('metrics.json')
+```
+
+Well, in this case the ensemble did better than the models alone! Can we explain what this resulting ensemble model is really using to make predictions? Is the minor increase worth the increased complexity?
+
+## Model Analysis?
+
+```{r errors}
+results$truth <- housing_test$SalePrice
+ggplot(results) + 
+  geom_point(aes(truth, ensemble)) +
+  theme_minimal() + 
+  labs(
+    title = "Errors",
+    x  = "Actual Home Values",
+    y = "Predicted Home Values"
+  ) + 
+  scale_x_continuous(labels = comma) + 
+  scale_y_continuous(labels = comma) + 
+  geom_abline(slope =1, intercept = 0)
+```
+
+```{r errors2}
+results$err <- (results$truth - results$ensemble)^2
+ggplot(results) + 
+  geom_point(aes(truth, err)) +
+  theme_minimal() + 
+  labs(
+    title = "Errors",
+    x  = "Actual Home Values",
+    y = "Squared Error"
+  ) + 
+  scale_x_continuous(labels = comma) + 
+  scale_y_continuous(labels = comma) + 
+  geom_smooth(aes(truth, err))
+```
+
+These errors suggest the model predicts worst on the high end for expensive homes, which is also where the least data is; its possible our test set "drifts" from the actual set here, but further investigation would be required.
+
+We can look at the ensemble contributors:
+
+```{r ensemble-parts}
+tibble(
+  models = colnames(results)[1:11],
+  relative_contribution = weights
+) %>% 
+  ggplot() + 
+  geom_col(aes(reorder(models, relative_contribution), relative_contribution)) + 
+  coord_flip() +
+  theme_minimal() + 
+  labs(
+    x = "Models",
+    y = "Relative Contribution"
+  )
+```
+
+So there are two models contributing, the tree model mostly and the linear model. For each we can get some sense of what is contributing:
+
+```{r linear-importance}
+lin_reg_wflow_fit[[1]] %>% 
+  pull_workflow_fit() %>% 
+  broom::tidy() %>% 
+  filter(term != "(Intercept)") %>% 
+  ggplot(aes(reorder(term, estimate), estimate)) + 
+  geom_col() + 
+  coord_flip() + 
+  theme_minimal() + 
+  labs(
+    title = "20% of Ensemble is...",
+    x = "",
+    y = "Contribution"
+  )
+```
+
+And the things that are important to the tree model:
+
+```{r tree-importance}
+tree_wflow_fit %>% 
+  pull_workflow_fit() %>% 
+  vip()
 ```
