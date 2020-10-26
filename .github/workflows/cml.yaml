@@ -1,4 +1,4 @@
-name: penguin-noses
+name: tidymodels-dvc-mashup
 on: [push]
 jobs:
   run:
@@ -14,8 +14,41 @@ jobs:
 
           apt-get update -y 
           apt-get install -y libssl-dev libcurl4-openssl-dev libxml2-dev
-          
+          apt-get install -y libicu-dev
+          apt-get install -y libglpk-dev
+          apt-get install -y libgmp3-dev
+          apt-get install -y libxml2-dev
+          apt-get install -y pandoc
+          dvc get-url https://gist.githubusercontent.com/slopp/aaa98f5c9d8d5161396b6afedb1b1b52/raw/86c6190a539ef751bfa99b3592d6a1952cccf939/housing.csv housing.csv
           dvc repro
           
-          cat fit_model.html >> report.md 
+          # Report metrics
+          echo "## Diff" >> report.md
+          git fetch --prune
+          dvc params diff master --show-md >> report.md
+          dvc metrics diff master --show-md >> report.md
+          
+          
+          # Table for current run
+          echo "## Details" >> report.md
+          cat metrics_table.html >> report.md 
+          
+          # Plots for current run
+          echo "## Plots" >> report.md
+          cml-publish errors.png --md >> report.md
+          cml-publish ensemble.png --md >> report.md
+          cml-publish tree-importance.png --md >> report.md
+          echo "Download fit_model.html for full details" >> report.md
+          
+          # send as PR comment
           cml-send-comment report.md
+          
+      - name: commit_results
+        uses: EndBug/add-and-commit@v5
+        with:
+          author_name: Sean Lopp
+          author_email: lopp.sean@gmail.com
+          message: "Result of run"
+          add: "fit_model.html metrics.json metrics_table.html"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

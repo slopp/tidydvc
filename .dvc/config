@@ -1,0 +1,2 @@
+['remote "myremote"']
+    url = s3://testdvc

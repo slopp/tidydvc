@@ -1,2 +1,4 @@
 tune:
   trees: 100
+ensemble:e
+  alpha: 1
