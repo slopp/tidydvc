@@ -1,0 +1,15 @@
+fit-models:
+  cmd: Rscript render-it.R
+  deps:
+  - path: fit_model.Rmd
+    md5: f1f38f563bfcd2e90ccf68ba75aa87e9
+  - path: housing.csv
+    md5: 03e78e4c63e93e971fe912393a5f7abd
+  - path: render-it.R
+    md5: 7e55b37769ddb2cdc8e82ce4eac1b72b
+  params:
+    params.yaml:
+      tune.trees: 100
+  outs:
+  - path: metrics.json
+    md5: 4396bf9db539aee26ef59dd0f8655134

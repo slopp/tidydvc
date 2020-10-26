@@ -108,7 +108,7 @@ lin_res <-
 
 ```{r trees}
 # next setup the tree model, using the DVC defined experiment parameters
-params <- yaml::read_yaml('params.yml')
+params <- yaml::read_yaml('params.yaml')
 trees <- params$tune$trees
 tree_spec <- boost_tree(mode = "regression", trees = trees) %>% 
   set_engine("xgboost")

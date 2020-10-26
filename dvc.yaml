@@ -1,0 +1,12 @@
+stages:
+  fit-models:
+    cmd: Rscript render-it.R
+    deps:
+    - fit_model.Rmd
+    - housing.csv
+    - render-it.R
+    params:
+    - tune.trees
+    metrics:
+    - metrics.json:
+        cache: false

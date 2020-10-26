@@ -1,0 +1,1 @@
+rmarkdown::render("fit_model.Rmd")
