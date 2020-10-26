@@ -282,6 +282,13 @@
       "Repository": "RSPM",
       "Hash": "2b7d10581cc730804e9ed178c8374bd6"
     },
+    "data.table": {
+      "Package": "data.table",
+      "Version": "1.12.8",
+      "Source": "Repository",
+      "Repository": "RSPM",
+      "Hash": "cd711af60c47207a776213a368626369"
+    },
     "dbplyr": {
       "Package": "dbplyr",
       "Version": "1.4.4",
@@ -615,6 +622,13 @@
       "Source": "Repository",
       "Repository": "RSPM",
       "Hash": "2657f20b9a74c996c602e74ebe540b06"
+    },
+    "kableExtra": {
+      "Package": "kableExtra",
+      "Version": "1.1.0",
+      "Source": "Repository",
+      "Repository": "RSPM",
+      "Hash": "37e11c605b3c0b7207763beda52c8535"
     },
     "knitr": {
       "Package": "knitr",
@@ -1343,6 +1357,13 @@
       "Repository": "RSPM",
       "Hash": "5c786a8883c9f49f6d137ee76558ceef"
     },
+    "webshot": {
+      "Package": "webshot",
+      "Version": "0.5.2",
+      "Source": "Repository",
+      "Repository": "RSPM",
+      "Hash": "e99d80ad34457a4853674e89d5e806de"
+    },
     "whisker": {
       "Package": "whisker",
       "Version": "0.4",
@@ -1375,6 +1396,13 @@
       "Source": "Repository",
       "Repository": "RSPM",
       "Hash": "ddeca7650052ff9131ac7c41a9a77b3b"
+    },
+    "xgboost": {
+      "Package": "xgboost",
+      "Version": "1.1.1.1",
+      "Source": "Repository",
+      "Repository": "RSPM",
+      "Hash": "17b1f93f73844394d1578de45a681bea"
     },
     "xml2": {
       "Package": "xml2",
