@@ -15,6 +15,7 @@ library(gt)
 library(vip)
 library(jsonlite)
 library(yaml)
+library(kableExtra)
 ```
 
 The goal of this document is fit and select candidate models. We use the [DVC](https://dvc.org) system to track and manage the model hyper-parameters and metrics, and [tidymodels](https://tidymodels.prg) for the actual fitting.
@@ -30,7 +31,7 @@ write_csv(ames_raw, "housing.csv")
 
 We will use the `tune` package to evaluate a few different models. I attempted to use `stacks` to fit ensembles as well but hit an error, however we will also consider a manually fit ensemble.
 
-```{r data}
+```{r data, message=FALSE, warning=FALSE}
 # first read our data and create test / training
 data <- read_csv("housing.csv")
 housing_split <- initial_split(data)
@@ -83,7 +84,7 @@ The outcome is that the DVC "pipeline" will really be just one big step, `rmarkd
 
 The idea with tuning is to fit a bunch of candidate models using cross validation `model_spec` + `workflow` + `tune_grid`. Then from the candidate models, pick the best model, or use the best of the candidates in an ensemble!
 
-```{r linear}
+```{r linear, message=TRUE, warning=FALSE}
 # first the linear regression with penalty
 # here we will use tune to set the penalty and mixture
 lin_reg_spec <- 
@@ -136,7 +137,7 @@ tree_res <-
 
 ~Finally we can create the ensemble definition using `stacks` and begin fitting!~ Unfortunately this didn't work, but we can get close with our own `glmnet`.
 
-```{r ensemble}
+```{r ensemble, message=FALSE, warning=FALSE}
 # create the stack
 # this is where we align the resample subsets with the resample sets used
 # to train the tuned cross validation candidates
@@ -151,15 +152,24 @@ housing_model_stack <-
 
 # Instead I can just use glmnet manually to figure out the best blend
 # which is what blend_predictions does under the hood
+# Note: cv.glmnet uses alpha=1 (LASSO) by default, but a DVC parameter
+# controls the blend; alpha=0 is ridge; 1 lasso, in between is elastic net
+alpha <- params$ensemble$alpha
 cv <- cv.glmnet(
   as.matrix(housing_model_stack[,-1]), 
-  as.matrix(housing_model_stack[,1])
+  as.matrix(housing_model_stack[,1]),
+  alpha = alpha
 )
 cv$lambda.1se
 best_mix <- which(cv$lambda == cv$lambda.1se)
 weights <- cv$glmnet.fit$beta[,best_mix]
 intercept <- cv$glmnet.fit$a0[best_mix]
 
+print('Ensemble Weights:')
+print(weights)
+```
+
+```{r finalize, message=FALSE, warning=FALSE}
 # but now I have to do quite a bit of work to finalize the workflows
 # in order to have a prediction function
 # we finalize the the models that were fit on a resampled subset (during cv) 
@@ -206,17 +216,13 @@ ensemble_predict <- function(new_data){
   x
 }
 
-
-
+results <- ensemble_predict(housing_test)
 ```
 
 Now that we have our ensemble we can produce a few metrics that will be displayed in the DVC pull requests. 
 
-```{r metrics}
-results <- ensemble_predict(housing_test)
-
+```{r metrics, message=FALSE, warning=FALSE}
 get_metrics <- function(results, model_name) {
-  print(model_name)
   tibble(
     model = model_name,
     rmse = rmse_vec(housing_test$SalePrice, results[,model_name]),
@@ -229,15 +235,21 @@ metrics
 ```
 
 ```{r save-table}
-gt(metrics) %>% 
-  gtsave("metrics_table.html")
-
+# save metrics to show on DVC comment
+# gt's save a png could be used for richer formatted
+# tables, but requires webshot
+# gt(metrics) %>% 
+#   gtsave("metrics.png")
+kableExtra::kable(metrics) %>% 
+  write_file('metrics_table.html')
 ```
 
 ```{r save-metrics}
+# write out metrics for DVC 
 metrics %>% 
   arrange(desc(rsq)) %>% 
   head(n=1) %>% 
+  jsonlite::unbox() %>% 
   jsonlite::write_json('metrics.json')
 ```
 
@@ -247,7 +259,7 @@ Well, in this case the ensemble did better than the models alone! Can we explain
 
 ```{r errors}
 results$truth <- housing_test$SalePrice
-ggplot(results) + 
+p <- ggplot(results) + 
   geom_point(aes(truth, ensemble)) +
   theme_minimal() + 
   labs(
@@ -258,6 +270,8 @@ ggplot(results) +
   scale_x_continuous(labels = comma) + 
   scale_y_continuous(labels = comma) + 
   geom_abline(slope =1, intercept = 0)
+p
+ggsave("errors.png", p)
 ```
 
 ```{r errors2}
@@ -291,12 +305,17 @@ tibble(
   labs(
     x = "Models",
     y = "Relative Contribution"
-  )
+  ) -> p
+p
+ggsave("ensemble.png", p)
 ```
 
 So there are two models contributing, the tree model mostly and the linear model. For each we can get some sense of what is contributing:
 
 ```{r linear-importance}
+# this code is a little brittle, ideally it should pull the 
+# linear model with the biggest relative weight, not just the 
+# first one
 lin_reg_wflow_fit[[1]] %>% 
   pull_workflow_fit() %>% 
   broom::tidy() %>% 
@@ -317,5 +336,7 @@ And the things that are important to the tree model:
 ```{r tree-importance}
 tree_wflow_fit %>% 
   pull_workflow_fit() %>% 
-  vip()
+  vip() -> p
+p
+ggsave('tree-importance.png', p)
 ```

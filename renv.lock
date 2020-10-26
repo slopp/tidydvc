@@ -623,6 +623,13 @@
       "Repository": "RSPM",
       "Hash": "2657f20b9a74c996c602e74ebe540b06"
     },
+    "kableExtra": {
+      "Package": "kableExtra",
+      "Version": "1.1.0",
+      "Source": "Repository",
+      "Repository": "RSPM",
+      "Hash": "37e11c605b3c0b7207763beda52c8535"
+    },
     "knitr": {
       "Package": "knitr",
       "Version": "1.29",
@@ -1349,6 +1356,13 @@
       "Source": "Repository",
       "Repository": "RSPM",
       "Hash": "5c786a8883c9f49f6d137ee76558ceef"
+    },
+    "webshot": {
+      "Package": "webshot",
+      "Version": "0.5.2",
+      "Source": "Repository",
+      "Repository": "RSPM",
+      "Hash": "e99d80ad34457a4853674e89d5e806de"
     },
     "whisker": {
       "Package": "whisker",
