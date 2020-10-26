@@ -19,7 +19,7 @@ jobs:
           apt-get install -y libgmp3-dev
           apt-get install -y libxml2-dev
           apt-get install -y pandoc
-          dvc get-url https://gist.github.com/slopp/aaa98f5c9d8d5161396b6afedb1b1b52#file-housing-csv housing.csv
+          dvc get-url https://gist.githubusercontent.com/slopp/aaa98f5c9d8d5161396b6afedb1b1b52/raw/86c6190a539ef751bfa99b3592d6a1952cccf939/housing.csv housing.csv
           dvc repro
           
           cat fit_model.html >> report.md 
