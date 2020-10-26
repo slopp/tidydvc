@@ -15,6 +15,9 @@ jobs:
           apt-get update -y 
           apt-get install -y libssl-dev libcurl4-openssl-dev libxml2-dev
           apt-get install -y libicu-dev
+          apt-get install -y libglpk-dev
+          apt-get install -y libgmp3-dev
+          apt-get install -y libxml2-dev
           apt-get install -y pandoc
           dvc get-url https://gist.github.com/slopp/aaa98f5c9d8d5161396b6afedb1b1b52#file-housing-csv housing.csv
           dvc repro
